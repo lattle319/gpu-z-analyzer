@@ -1,0 +1,55 @@
+# GitHub Actions workflow for CI
+# This workflow runs on every push to main and every pull request.
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '48 13 * * 3'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Install dependencies
+      run: npm ci
+    - name: Run tests
+      run: npm test
+
+  security_scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Install dependencies
+      run: npm ci
+    - name: Run npm audit
+      run: npm audit --audit-level=moderate
+
+  codeql:
+    name: 'CodeQL'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: 'typescript'
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
