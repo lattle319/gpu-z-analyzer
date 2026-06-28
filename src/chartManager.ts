@@ -46,6 +46,8 @@ export class ChartManager {
   private chartInstances: Map<string, Chart> = new Map();
   private undoStacks: Map<string, CanvasState[]> = new Map();
   private redoStacks: Map<string, CanvasState[]> = new Map();
+  private shareAxisStates: Map<string, boolean> = new Map();
+  private enabledColumnsMap: Map<string, string[]> = new Map();
 
   // Callback for when visible range changes (pan/zoom) to update statistics
   private onRangeChange: (filename: string, dataname: string, minX: number, maxX: number) => void;
@@ -81,6 +83,8 @@ export class ChartManager {
         this.chartInstances.delete(key);
         this.undoStacks.delete(key);
         this.redoStacks.delete(key);
+        this.shareAxisStates.delete(key);
+        this.enabledColumnsMap.delete(key);
 
         const wrapper = document.getElementById(`chart-wrapper-${key}`);
         if (wrapper) wrapper.remove();
@@ -103,6 +107,8 @@ export class ChartManager {
         if (this.chartInstances.has(key)) {
           this.chartInstances.get(key)!.destroy();
           this.chartInstances.delete(key);
+          this.shareAxisStates.delete(key);
+          this.enabledColumnsMap.delete(key);
           const wrapper = document.getElementById(`chart-wrapper-${key}`);
           if (wrapper) wrapper.remove();
         }
@@ -124,6 +130,8 @@ export class ChartManager {
     data: any,
     enabledColumns: string[]
   ) {
+    this.enabledColumnsMap.set(key, enabledColumns);
+
     const wrapper = document.createElement('div');
     wrapper.id = `chart-wrapper-${key}`;
     wrapper.style.marginBottom = '20px';
@@ -160,12 +168,30 @@ export class ChartManager {
     const btnAutoFitAll = document.createElement('button');
     btnAutoFitAll.innerText = 'AutoFit (All)';
 
+    const labelShareAxis = document.createElement('label');
+    labelShareAxis.style.display = 'flex';
+    labelShareAxis.style.alignItems = 'center';
+    labelShareAxis.style.gap = '5px';
+    labelShareAxis.style.color = '#cccccc';
+    labelShareAxis.style.cursor = 'pointer';
+
+    const checkboxShareAxis = document.createElement('input');
+    checkboxShareAxis.type = 'checkbox';
+    checkboxShareAxis.checked = false;
+
+    const spanShareAxis = document.createElement('span');
+    spanShareAxis.innerText = 'Share Axis';
+
+    labelShareAxis.appendChild(checkboxShareAxis);
+    labelShareAxis.appendChild(spanShareAxis);
+
     toolbar.appendChild(title);
     toolbar.appendChild(btnReset);
     toolbar.appendChild(btnUndo);
     toolbar.appendChild(btnRedo);
     toolbar.appendChild(btnAutoFitLocal);
     toolbar.appendChild(btnAutoFitAll);
+    toolbar.appendChild(labelShareAxis);
 
     // Canvas container
     const canvasContainer = document.createElement('div');
@@ -184,7 +210,7 @@ export class ChartManager {
     this.redoStacks.set(key, []);
 
     // Create Chart
-    const chartData = this.buildChartData(data, enabledColumns);
+    const chartData = this.buildChartData(key, data, enabledColumns);
     const chartOptions = this.buildChartOptions(key, filename, dataname, enabledColumns);
 
     const chart = new Chart(canvas, {
@@ -219,6 +245,11 @@ export class ChartManager {
       this.autoFitAll(key);
     });
 
+    checkboxShareAxis.addEventListener('change', () => {
+      this.shareAxisStates.set(key, checkboxShareAxis.checked);
+      this.updateChart(key, data, this.enabledColumnsMap.get(key) || []);
+    });
+
     // Initial notify
     setTimeout(() => {
         this.notifyRangeChange(filename, dataname, chart);
@@ -226,10 +257,12 @@ export class ChartManager {
   }
 
   private updateChart(key: string, data: any, enabledColumns: string[]) {
+    this.enabledColumnsMap.set(key, enabledColumns);
+
     const chart = this.chartInstances.get(key);
     if (!chart) return;
 
-    chart.data = this.buildChartData(data, enabledColumns);
+    chart.data = this.buildChartData(key, data, enabledColumns);
     chart.options = this.buildChartOptions(
       key,
       key.split('::')[0],
@@ -240,11 +273,20 @@ export class ChartManager {
     chart.update();
   }
 
-  private buildChartData(data: any, enabledColumns: string[]): ChartData<'line'> {
+  private buildChartData(key: string, data: any, enabledColumns: string[]): ChartData<'line'> {
     const dates = data.DATE as Date[];
+    const isShared = this.shareAxisStates.get(key) === true;
 
     const datasets = enabledColumns.map((colName, idx) => {
       const colData = data[colName] as number[];
+      let yAxisID = `y-${idx}`;
+
+      if (isShared) {
+        const match = colName.match(/\[(.*?)\]\s*$/);
+        const unit = match ? match[1].trim() : 'none';
+        yAxisID = `y-shared-${unit}`;
+      }
+
       return {
         label: colName,
         data: dates.map((date, i) => ({ x: date.getTime(), y: colData[i] })),
@@ -252,7 +294,7 @@ export class ChartManager {
         borderWidth: 1,
         pointRadius: 0, // hide points for better performance
         pointHitRadius: 5,
-        yAxisID: `y-${idx}`, // each column gets its own Y axis
+        yAxisID: yAxisID,
         animation: false,
         parsing: false // Performance boost
       };
@@ -283,25 +325,59 @@ export class ChartManager {
       }
     };
 
-    enabledColumns.forEach((colName, idx) => {
-      scales[`y-${idx}`] = {
-        type: 'linear',
-        display: true,
-        position: 'right', // Right side Y-axis
-        title: {
+    const isShared = this.shareAxisStates.get(key) === true;
+
+    if (isShared) {
+      const units = new Set<string>();
+      enabledColumns.forEach(colName => {
+        const match = colName.match(/\[(.*?)\]\s*$/);
+        const unit = match ? match[1].trim() : 'none';
+        units.add(unit);
+      });
+
+      let isFirstScale = true;
+      Array.from(units).forEach((unit, idx) => {
+        const yAxisID = `y-shared-${unit}`;
+        scales[yAxisID] = {
+          type: 'linear',
           display: true,
-          text: colName,
-          color: this.colorPalette[idx % this.colorPalette.length]
-        },
-        ticks: {
-          color: this.colorPalette[idx % this.colorPalette.length]
-        },
-        grid: {
-          drawOnChartArea: idx === 0, // only draw grid for the first y-axis to avoid clutter
-          color: '#3c3c3c'
-        }
-      };
-    });
+          position: 'right',
+          title: {
+            display: true,
+            text: unit === 'none' ? 'No Unit' : unit,
+            color: this.colorPalette[idx % this.colorPalette.length]
+          },
+          ticks: {
+            color: this.colorPalette[idx % this.colorPalette.length]
+          },
+          grid: {
+            drawOnChartArea: isFirstScale,
+            color: '#3c3c3c'
+          }
+        };
+        isFirstScale = false;
+      });
+    } else {
+      enabledColumns.forEach((colName, idx) => {
+        scales[`y-${idx}`] = {
+          type: 'linear',
+          display: true,
+          position: 'right', // Right side Y-axis
+          title: {
+            display: true,
+            text: colName,
+            color: this.colorPalette[idx % this.colorPalette.length]
+          },
+          ticks: {
+            color: this.colorPalette[idx % this.colorPalette.length]
+          },
+          grid: {
+            drawOnChartArea: idx === 0, // only draw grid for the first y-axis to avoid clutter
+            color: '#3c3c3c'
+          }
+        };
+      });
+    }
 
     return {
       responsive: true,
@@ -466,6 +542,8 @@ export class ChartManager {
     const minX = chart.scales['x'].min;
     const maxX = chart.scales['x'].max;
 
+    const scaleRanges: { [yAxisID: string]: { min: number, max: number } } = {};
+
     chart.data.datasets.forEach(dataset => {
       const yAxisID = dataset.yAxisID as string;
       const data = dataset.data as { x: number; y: number }[];
@@ -480,7 +558,19 @@ export class ChartManager {
         }
       }
 
-      if (min !== Infinity && max !== -Infinity && chart.options.scales![yAxisID]) {
+      if (min !== Infinity && max !== -Infinity) {
+        if (!scaleRanges[yAxisID]) {
+          scaleRanges[yAxisID] = { min, max };
+        } else {
+          scaleRanges[yAxisID].min = Math.min(scaleRanges[yAxisID].min, min);
+          scaleRanges[yAxisID].max = Math.max(scaleRanges[yAxisID].max, max);
+        }
+      }
+    });
+
+    Object.keys(scaleRanges).forEach(yAxisID => {
+      const { min, max } = scaleRanges[yAxisID];
+      if (chart.options.scales![yAxisID]) {
         // Add 5% padding
         const padding = (max - min) * 0.05;
         chart.options.scales![yAxisID]!.min = min - padding;
@@ -497,6 +587,8 @@ export class ChartManager {
 
     this.saveZoomState(key);
 
+    const scaleRanges: { [yAxisID: string]: { min: number, max: number } } = {};
+
     chart.data.datasets.forEach(dataset => {
       const yAxisID = dataset.yAxisID as string;
       const data = dataset.data as { x: number; y: number }[];
@@ -509,7 +601,19 @@ export class ChartManager {
         if (pt.y > max) max = pt.y;
       }
 
-      if (min !== Infinity && max !== -Infinity && chart.options.scales![yAxisID]) {
+      if (min !== Infinity && max !== -Infinity) {
+        if (!scaleRanges[yAxisID]) {
+          scaleRanges[yAxisID] = { min, max };
+        } else {
+          scaleRanges[yAxisID].min = Math.min(scaleRanges[yAxisID].min, min);
+          scaleRanges[yAxisID].max = Math.max(scaleRanges[yAxisID].max, max);
+        }
+      }
+    });
+
+    Object.keys(scaleRanges).forEach(yAxisID => {
+      const { min, max } = scaleRanges[yAxisID];
+      if (chart.options.scales![yAxisID]) {
         const padding = (max - min) * 0.05;
         chart.options.scales![yAxisID]!.min = min - padding;
         chart.options.scales![yAxisID]!.max = max + padding;
