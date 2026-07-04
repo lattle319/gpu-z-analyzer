@@ -63,6 +63,7 @@ export function createLayout(root: HTMLElement): {
       display: flex;
       flex-direction: column;
       overflow-y: auto;
+      overflow-x: auto;
     }
     .layout-panel {
       height: 200px;

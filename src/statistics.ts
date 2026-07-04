@@ -127,7 +127,7 @@ export class StatisticsManager {
 
         // Build table
         const table = document.createElement('table');
-        table.style.width = '100%';
+        table.style.width = 'max-content';
         table.style.borderCollapse = 'collapse';
         table.style.fontSize = '12px';
         table.style.marginBottom = '10px';
