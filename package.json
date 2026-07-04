@@ -19,7 +19,9 @@
     "vitest": "^4.1.9"
   },
   "scripts": {
-    "test": "vitest"
+    "test": "vitest",
+    "dev": "vite",
+    "build": "vite build"
   },
   "repository": {
     "type": "git",
