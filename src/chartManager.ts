@@ -396,7 +396,6 @@ export class ChartManager {
           pan: {
             enabled: true,
             mode: 'x',
-            modifierKey: 'ctrl',
             onPanStart: () => {
               this.saveZoomState(key);
             },
